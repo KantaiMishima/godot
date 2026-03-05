@@ -84,7 +84,8 @@ func _capture_scene(scene_path: String, output_dir: String) -> void:
 		else:
 			printerr("  FAIL: Could not save PNG (err=", err, ")")
 
-	scene_node.queue_free()
+	if is_instance_valid(scene_node):
+		scene_node.queue_free()
 	vp.queue_free()
 	await process_frame
 
