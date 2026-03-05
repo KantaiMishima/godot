@@ -11,7 +11,7 @@ Godot エンジンに **visual regression test** と **interaction test** の仕
 
 ### アーキテクチャ全体像
 
-```
+```bash
 CLI / スクリプト
   │
   ├─ シーン列挙（.tscn を再帰探索）
@@ -35,12 +35,12 @@ CLI / スクリプト
 ### 実装コンポーネント一覧
 
 | コンポーネント | 状態 | 備考 |
-|---|---|---|
-| CLI / 実行スクリプト | 未実装 | GDScript の `--script` モードで実装予定 |
+| :--- | :--- | :--- |
+| CLI / 実行スクリプト | **実装済み** | `tests/visual_regression/capture.gd` |
 | 実レンダリングバックエンドの利用 | **検証済み** | 下記「調査結果」参照 |
-| シーン列挙メカニズム | 未実装 | `.tscn` を再帰探索 |
-| SubViewport + `get_image()` キャプチャ | **検証済み** | 実ピクセル取得を確認 |
-| フレーム安定化（待機） | 未実装 | 適切なフレーム数は要検討 |
+| シーン列挙メカニズム | **実装済み** | `res://` を再帰探索、引数指定も可 |
+| SubViewport + `get_image()` キャプチャ | **検証済み** | 実ピクセル取得・実シーン撮影を確認 |
+| フレーム安定化（待機） | **実装済み** | 現在 5 フレーム待機（要調整） |
 | ゴールデンイメージ保管場所 | 未実装 | `baselines/{platform}/` に配置予定 |
 | 画像比較ユーティリティ | 未実装 | regsuite 等外部ツールで代替予定 |
 | プラットフォーム別基準画像 | 未実装 | macOS / Linux / Windows で分離予定 |
@@ -49,8 +49,8 @@ CLI / スクリプト
 ### 着手順序
 
 1. **実レンダラ起動の検証** ← **完了**
-2. シーンロード → フレーム待機 → キャプチャ のパイプライン構築
-3. CLI / スクリプトの整備（シーン列挙含む）
+2. **シーンロード → フレーム待機 → キャプチャのパイプライン構築** ← **完了**
+3. CLI / スクリプトの整備（シーン列挙含む） ← **完了**（capture.gd として実装）
 4. ゴールデンイメージの管理方法の確定（regsuite 連携含む）
 
 ---
@@ -59,7 +59,7 @@ CLI / スクリプト
 
 ### Godot のレンダリング階層
 
-```
+```bash
 DisplayServer（抽象）
   ├─ DisplayServerHeadless  -- --headless フラグで使用。RasterizerDummy を強制する。ピクセル生成不可
   │    └─ DisplayServerMock -- テスト用。入力シミュレーション追加。同様にピクセル生成不可
@@ -105,7 +105,7 @@ if (String v = OS::get_singleton()->get_environment("GODOT_MTL_OFF_SCREEN"); v =
 
 呼び出しチェーン：
 
-```
+```gd
 ViewportTexture::get_image()
   → RenderingServer::texture_2d_get(texture_rid)
     → TextureStorage::texture_2d_get(RID)          // renderer_rd
@@ -118,7 +118,8 @@ ViewportTexture::get_image()
 
 **環境:** macOS / Apple M2 / Godot 4.5.1.stable
 
-**実行コマンド:**
+#### PoC1: ColorRect のキャプチャ
+
 ```bash
 GODOT_MTL_OFF_SCREEN=1 /Applications/Godot.app/Contents/MacOS/Godot \
   --path /tmp/vr_test_project \
@@ -126,22 +127,41 @@ GODOT_MTL_OFF_SCREEN=1 /Applications/Godot.app/Contents/MacOS/Godot \
   --script capture_test.gd
 ```
 
-**結果:**
-```
+```text
 Metal 3.2 - Forward+ - Using Device #0: Apple - Apple M2 (Apple8)
-Image size: (320, 240)
-Image format: 4
-Center pixel: (1.0, 0.0, 0.0, 1.0)
+Image size: (320, 240) / Center pixel: (1.0, 0.0, 0.0, 1.0)
 SUCCESS: Center pixel is red as expected!
-Saved to: /tmp/vr_test_output.png
 ```
 
 SubViewport に追加した赤い `ColorRect` のピクセルを正確にキャプチャできることを確認。
 
+#### PoC2: 実プロジェクトの .tscn キャプチャ
+
+`capture.gd` を使って `mask-tower-defense` プロジェクトの `title.tscn` をキャプチャ。
+
+```bash
+GODOT_MTL_OFF_SCREEN=1 /Applications/Godot.app/Contents/MacOS/Godot \
+  --path /Users/mishimakanfutoshi/mask-tower-defense \
+  --rendering-driver metal \
+  --script /path/to/godot/tests/visual_regression/capture.gd \
+  -- res://title.tscn
+```
+
+```text
+=== Godot Visual Regression Capture ===
+Project: /Users/mishimakanfutoshi/mask-tower-defense/
+Scenes to capture: 1
+Capturing: res://title.tscn
+  Saved: /Users/mishimakanfutoshi/mask-tower-defense/vr_screenshots/title.png
+=== Done ===
+```
+
+1280×720 でタイトル画面（背景・テキスト・ボタン）が正確にレンダリングされることを確認。
+
 ### プラットフォーム別の対応方針
 
 | プラットフォーム | 方法 | 備考 |
-|---|---|---|
+| --- | --- | --- |
 | macOS | `GODOT_MTL_OFF_SCREEN=1` + `--rendering-driver metal` | ウィンドウは非表示で動作 |
 | Linux (CI) | `xvfb-run` + `--rendering-driver vulkan` | 仮想フレームバッファが必要 |
 | Linux (GPU あり) | `VK_EXT_headless_surface` | 現時点で Godot は未対応 |
@@ -175,7 +195,7 @@ SEND_GUI_ACTION("ui_text_newline");
 ## 関連ファイル
 
 | ファイル | 内容 |
-|---|---|
+| --- | --- |
 | `main/main.cpp:1448` | `--headless` フラグの処理 |
 | `servers/display/display_server_headless.cpp` | `RasterizerDummy` を強制する実装 |
 | `servers/rendering/dummy/rasterizer_dummy.h` | 全描画 no-op の実装 |

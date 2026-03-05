@@ -2,20 +2,62 @@ extends SceneTree
 
 ## Visual Regression Test - Capture Script
 ##
-## Usage:
+## Usage (対象プロジェクトの .tscn をキャプチャ):
 ##   GODOT_MTL_OFF_SCREEN=1 godot \
-##     --path tests/visual_regression \
+##     --path /path/to/your/project \
 ##     --rendering-driver metal \
-##     --script capture.gd
+##     --script /path/to/godot/tests/visual_regression/capture.gd \
+##     -- res://title.tscn
 ##
-## Output: tests/visual_regression/screenshots/{scene_name}.png
+## 引数なしの場合はプロジェクト内の全 .tscn をキャプチャ:
+##   GODOT_MTL_OFF_SCREEN=1 godot \
+##     --path /path/to/your/project \
+##     --rendering-driver metal \
+##     --script /path/to/godot/tests/visual_regression/capture.gd
+##
+## Output: {project_path}/vr_screenshots/{scene_name}.png
 
 const VIEWPORT_SIZE := Vector2i(1280, 720)
-const SETTLE_FRAMES := 3
-const OUTPUT_DIR := "screenshots"
+const SETTLE_FRAMES := 5
+const OUTPUT_DIR := "vr_screenshots"
 
 func _initialize() -> void:
 	print("=== Godot Visual Regression Capture ===")
+	print("Project: ", ProjectSettings.globalize_path("res://"))
+
+	# -- 以降の引数をシーンパスとして受け取る
+	var args := OS.get_cmdline_user_args()
+	var scenes: Array[String] = []
+
+	if args.size() > 0:
+		scenes.assign(args)
+	else:
+		scenes = _find_all_scenes()
+
+	if scenes.is_empty():
+		printerr("No scenes found.")
+		quit(1)
+		return
+
+	print("Scenes to capture: ", scenes.size())
+
+	var output_dir := ProjectSettings.globalize_path("res://" + OUTPUT_DIR)
+	DirAccess.make_dir_recursive_absolute(output_dir)
+
+	for scene_path in scenes:
+		await _capture_scene(scene_path, output_dir)
+
+	print("=== Done ===")
+	quit(0)
+
+
+func _capture_scene(scene_path: String, output_dir: String) -> void:
+	print("\nCapturing: ", scene_path)
+
+	var packed: PackedScene = load(scene_path)
+	if packed == null:
+		printerr("  FAIL: Could not load scene: ", scene_path)
+		return
 
 	var vp := SubViewport.new()
 	vp.size = VIEWPORT_SIZE
@@ -23,36 +65,50 @@ func _initialize() -> void:
 	vp.transparent_bg = false
 	root.add_child(vp)
 
-	# テスト用シーン（ColorRect で動作確認）
-	var rect := ColorRect.new()
-	rect.color = Color(1, 0, 0)
-	rect.size = Vector2(VIEWPORT_SIZE)
-	vp.add_child(rect)
+	var scene_node := packed.instantiate()
+	vp.add_child(scene_node)
 
-	# フレーム安定化
+	# フレーム安定化（レイアウト・アニメーション初期化を待つ）
 	for i in SETTLE_FRAMES:
 		await process_frame
 
 	var img := vp.get_texture().get_image()
-
 	if img == null or img.is_empty():
-		printerr("FAIL: image is null or empty")
-		quit(1)
-		return
-
-	print("Captured: ", img.get_size(), " format=", img.get_format())
-
-	DirAccess.make_dir_recursive_absolute(
-		ProjectSettings.globalize_path("res://" + OUTPUT_DIR)
-	)
-
-	var save_path := "res://%s/test_colorrect.png" % OUTPUT_DIR
-	var err := img.save_png(ProjectSettings.globalize_path(save_path))
-	if err == OK:
-		print("Saved: ", ProjectSettings.globalize_path(save_path))
+		printerr("  FAIL: image is null or empty")
 	else:
-		printerr("Failed to save PNG: ", err)
-		quit(1)
-		return
+		var file_name := scene_path.get_file().get_basename() + ".png"
+		var save_path := output_dir.path_join(file_name)
+		var err := img.save_png(save_path)
+		if err == OK:
+			print("  Saved: ", save_path)
+		else:
+			printerr("  FAIL: Could not save PNG (err=", err, ")")
 
-	quit(0)
+	scene_node.queue_free()
+	vp.queue_free()
+	await process_frame
+
+
+func _find_all_scenes() -> Array[String]:
+	var result: Array[String] = []
+	_scan_dir("res://", result)
+	return result
+
+
+func _scan_dir(path: String, result: Array[String]) -> void:
+	var dir := DirAccess.open(path)
+	if dir == null:
+		return
+	dir.list_dir_begin()
+	var name := dir.get_next()
+	while name != "":
+		if name.begins_with("."):
+			name = dir.get_next()
+			continue
+		var full := path.path_join(name)
+		if dir.current_is_dir():
+			_scan_dir(full, result)
+		elif name.ends_with(".tscn"):
+			result.append(full)
+		name = dir.get_next()
+	dir.list_dir_end()
