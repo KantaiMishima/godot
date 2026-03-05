@@ -9,27 +9,36 @@ Godot エンジンに **visual regression test** と **interaction test** の仕
 
 ## 現状の方針
 
+### 責務の分離方針
+
+**このリポジトリが提供するもの:** シーンのスクリーンショットを撮る仕組み（`capture.gd`）
+**利用者側に委ねるもの:** 基準画像との差分比較・管理（Argos CI / reg-suit / pixelmatch 等、任意のツール）
+
 ### アーキテクチャ全体像
 
-```bash
-CLI / スクリプト
-  │
-  ├─ シーン列挙（.tscn を再帰探索）
-  │
-  ├─ Godot 起動（実レンダラ付きオフスクリーン）
-  │    └─ GODOT_MTL_OFF_SCREEN=1 --rendering-driver metal  (macOS)
-  │    └─ xvfb-run --rendering-driver vulkan               (Linux CI)
-  │
-  ├─ シーンロード → N フレーム待機（レイアウト安定化）
-  │
-  ├─ SubViewport::get_image() でキャプチャ
-  │    └─ ビューポートサイズ固定（例: 1280×720）
-  │
-  ├─ PNG 保存
-  │    └─ tests/visual_regression/screenshots/{platform}/{scene_name}.png
-  │
-  └─ 外部ツール（regsuite 等）で基準画像と比較
-       └─ tests/visual_regression/baselines/{platform}/{scene_name}.png
+```text
+【このリポジトリの責務】
+  capture.gd
+    │
+    ├─ シーン列挙（.tscn を再帰探索 or 引数指定）
+    │
+    ├─ Godot 起動（実レンダラ付きオフスクリーン）
+    │    └─ GODOT_MTL_OFF_SCREEN=1 --rendering-driver metal  (macOS)
+    │    └─ xvfb-run --rendering-driver vulkan               (Linux CI)
+    │
+    ├─ シーンロード → N フレーム待機（レイアウト安定化）
+    │
+    ├─ SubViewport::get_image() でキャプチャ
+    │    └─ ビューポートサイズ固定（1280×720）
+    │
+    └─ PNG 保存 → {project}/vr_screenshots/{scene_name}.png
+
+【利用者側の責務】
+  任意の VRT ツールで比較
+    ├─ Argos CI（OSS 無料枠あり・PR コメント自動投稿）
+    ├─ reg-suit（S3/GCS に保管）
+    ├─ pixelmatch（自前スクリプト）
+    └─ その他
 ```
 
 ### 実装コンポーネント一覧
@@ -41,17 +50,18 @@ CLI / スクリプト
 | シーン列挙メカニズム | **実装済み** | `res://` を再帰探索、引数指定も可 |
 | SubViewport + `get_image()` キャプチャ | **検証済み** | 実ピクセル取得・実シーン撮影を確認 |
 | フレーム安定化（待機） | **実装済み** | 現在 5 フレーム待機（要調整） |
-| ゴールデンイメージ保管場所 | 未実装 | `baselines/{platform}/` に配置予定 |
-| 画像比較ユーティリティ | 未実装 | regsuite 等外部ツールで代替予定 |
-| プラットフォーム別基準画像 | 未実装 | macOS / Linux / Windows で分離予定 |
+| ゴールデンイメージ保管場所 | **利用者側に委任** | 比較ツールの流儀に従う |
+| 画像比較ユーティリティ | **利用者側に委任** | Argos CI / reg-suit / pixelmatch 等、任意 |
+| プラットフォーム別基準画像 | **利用者側に委任** | 比較ツール側で管理 |
 | CI 統合 | 未実装 | Linux: xvfb-run が必要 |
 
 ### 着手順序
 
 1. **実レンダラ起動の検証** ← **完了**
 2. **シーンロード → フレーム待機 → キャプチャのパイプライン構築** ← **完了**
-3. CLI / スクリプトの整備（シーン列挙含む） ← **完了**（capture.gd として実装）
-4. ゴールデンイメージの管理方法の確定（regsuite 連携含む）
+3. **CLI / スクリプトの整備（シーン列挙含む）** ← **完了**（capture.gd として実装）
+4. **ゴールデンイメージ管理・差分比較の方針確定** ← **完了**（利用者側に委任）
+5. CI 統合（Linux: xvfb-run 対応）
 
 ---
 
