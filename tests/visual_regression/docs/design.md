@@ -11,6 +11,7 @@ Godot エンジンに **visual regression test** と **interaction test** の仕
 
 ### 責務の分離方針
 
+**配布形態:** 独立した addon リポジトリとして配布。ユーザーは `addons/` 配下にクローンして使う
 **このリポジトリが提供するもの:** シーンのスクリーンショットを撮る仕組み（`capture.gd`）
 **利用者側に委ねるもの:** 基準画像との差分比較・管理（Argos CI / reg-suit / pixelmatch 等、任意のツール）
 
